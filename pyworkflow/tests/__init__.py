@@ -202,7 +202,13 @@ DataSet(name='movies',  folder='movies',
                'movie2': 'ribo/Falcon_2012_06_12-16_55_40_0_movie.mrcs',
                'movie3': 'ribo/Falcon_2012_06_12-17_26_54_0_movie.mrcs',
                'movie4': 'qbeta/qbeta.mrc',
-               'movie5': 'cct/cct_1.em'})
+               'movie5': 'cct/cct_1.em',
+               'falcon2012_1':'Falcon_2012_06_12-16_55_40_0_movie.mrcs',
+               'mrcGain': 'gain.mrc',
+               'mrcDark': 'dark.mrc',
+               'spiGain': 'gain.spi',
+               'spiDark': 'dark.spi',
+               })
 
 DataSet(name='riboMovies',  folder='riboMovies',
         files={'movie1': '30_movie_gc_window.mrcs',
