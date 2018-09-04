@@ -27,16 +27,16 @@
 
 import json
 import os
+
 from pyworkflow.em import *
 from pyworkflow.utils import Environ
 from pyworkflow.protocol.launch import launch
 from pyworkflow.utils.path import *
 from pyworkflow.em.showj import launchSupervisedPickerGUI
 from convert import writeSetOfMicrographs, readSetOfCoordinates
+
 import xmipp
 from xmipp3 import XmippProtocol
-from convert import getEnviron
-
 
 
 class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
@@ -87,7 +87,6 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         self._insertFunctionStep('convertTrainCoordsStep')
         self._insertFunctionStep('cryoloModelingStep')
         self._insertFunctionStep('cryoloDeepPickingStep')
-        # Insert step to create output objects
         self._insertFunctionStep('createOutputStep')
 
     def launchParticlePickGUIStep(self, micFn):
@@ -153,7 +152,7 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
     def createConfigurationFile(self):
 
         inputSize = self.input_size.get()
-        anchors = self.boxSize
+        anchors = self.boxSize.get()
         maxBoxPerImage = self.max_box_per_image.get()
 
         model = {"architecture": "crYOLO",
@@ -195,31 +194,16 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
 
     def cryoloModelingStep(self):
-
-        def getEnviron():
-            """ Setup the environment variables needed to launch 3DFSC. """
-            environ = Environ(os.environ)
-            CRYOLO_HOME = os.environ.get('CRYOLO_HOME')
-
-            environ.update({
-                'PATH': join(CRYOLO_HOME, 'bin'),
-            }, position=Environ.BEGIN)
-
-            if 'PYTHONPATH' in environ:
-                # this is required for python virtual env to work
-                environ.set('PYTHONPATH', '', position=Environ.BEGIN)
-            return environ
-
         # TEMPLATE: -c config.json -w 0 -g 0 -e 10
         wParam = 0  # define this in the form ???
         gParam = 0  # define this in the form ???
         eParam = 0  # define this in the form ???
-        params = "-c config_generalized_model.json"
+        params = "-c config.json"
         params += " -w %s -g %s" % (wParam, gParam)
         if eParam != 0:
             params += " -e %s" % eParam
 
-        program = self._getProgram('cryolo_train.py')
+        program = getProgram('cryolo_train.py')
 
         self.preparingCondaProgram(program, params):
         shellName = os.environ.get('SHELL')
@@ -232,7 +216,22 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
 
     def cryoloDeepPickingStep(self):
-        pass
+        wParam = model.h5  # define this in the form ???
+        gParam = 0  # define this in the form ???
+        eParam = 0  # define this in the form ???
+        tParam = 0.2 # define this in the form ???
+        params = "-c config.json"
+        params += " -w %s -g %s" % (wParam, gParam)
+        params += "-i full_data/"
+        params += "-o boxfiles/"
+        params += "-t %s" % tParam
+
+        program2 = getProgram('cryolo_predict.py')
+        shellName = os.environ.get('SHELL')
+        self.info("**Running:** %s %s" % (program2, params))
+        self.runJob('%s ./script.sh' % shellName, '',
+                    cwd=self._getExtraPath(),
+                    env=getEnviron())
 
 
     def preparingCondaProgram(self, program, params):
@@ -245,14 +244,6 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         lines += 'source deactivate\n'
         f.write(lines)
         f.close()
-
-    def _getProgram(self, program):
-        """ Return the program binary that will be used. """
-        if 'CRYOLO_HOME' not in os.environ:
-            self.info("CRYOLO_HOME is not in the environ")
-            return None
-        cmd = join(os.environ['CRYOLO_HOME'], 'bin', program)
-        return cmd
 
 
     # def _getArgs(self):
@@ -353,7 +344,7 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
     #--------------------------- INFO functions --------------------------------
     def _citations(self):
-        return ['Abrishami2013']
+        return ['Wagner2018']
 
     #--------------------------- UTILS functions -------------------------------
     def __str__(self):
@@ -442,3 +433,26 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
     def getCoordsDir(self):
         return self._getExtraPath()
+
+
+def getEnviron():
+    """ Setup the environment variables needed to launch 3DFSC. """
+    environ = Environ(os.environ)
+    CRYOLO_HOME = os.environ.get('CRYOLO_HOME')
+
+    environ.update({
+        'PATH': join(CRYOLO_HOME, 'bin'),
+    }, position=Environ.BEGIN)
+
+    if 'PYTHONPATH' in environ:
+        # this is required for python virtual env to work
+        environ.set('PYTHONPATH', '', position=Environ.BEGIN)
+    return environ
+
+def getProgram(self, program):
+    """ Return the program binary that will be used. """
+    if 'CRYOLO_HOME' not in os.environ:
+        print("CRYOLO_HOME is not in the environ")
+        return None
+    cmd = join(os.environ['CRYOLO_HOME'], 'bin', program)
+    return cmd
