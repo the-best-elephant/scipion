@@ -85,6 +85,7 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         # Launch Particle Picking GUI
         self._insertFunctionStep('launchParticlePickGUIStep', micFn)
         self._insertFunctionStep('convertTrainCoordsStep')
+        self._insertFunctionStep('createConfigurationFileStep')
         self._insertFunctionStep('cryoloModelingStep')
         self._insertFunctionStep('cryoloDeepPickingStep')
         self._insertFunctionStep('createOutputStep')
@@ -149,7 +150,7 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
     #     #print (self.input_size.get())
 
 
-    def createConfigurationFile(self):
+    def createConfigurationFileStep(self):
 
         inputSize = self.input_size.get()
         anchors = self.boxSize.get()
@@ -195,20 +196,21 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
     def cryoloModelingStep(self):
         # TEMPLATE: -c config.json -w 0 -g 0 -e 10
-        wParam = 0  # define this in the form ???
-        gParam = 0  # define this in the form ???
+        wParam = 3  # define this in the form ???
+        gParam = 2  # define this in the form ???
         eParam = 0  # define this in the form ???
         params = "-c config.json"
         params += " -w %s -g %s" % (wParam, gParam)
         if eParam != 0:
             params += " -e %s" % eParam
 
-        program = getProgram('cryolo_train.py')
+        #program = getProgram('cryolo_train.py')
+        program = self._getProgram('cryolo_boxmanager.py')
 
-        self.preparingCondaProgram(program, params):
+        self.preparingCondaProgram(program)#, params)
         shellName = os.environ.get('SHELL')
 
-        self.info("**Running:** %s %s" % (program, param))
+        self.info("**Running:** %s %s" % (program, params))
         self.runJob('%s ./script.sh' % shellName, '', cwd=self._getExtraPath(),
                     env=getEnviron())
         # if not exists(self._getFileName('out_vol3DFSC')):
@@ -234,7 +236,8 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
                     env=getEnviron())
 
 
-    def preparingCondaProgram(self, program, params):
+    def preparingCondaProgram(self, program, params=''):
+        CRYOLO_ENV_NAME = 'cryolo'
         f = open(self._getExtraPath('script.sh'), "w")
         # print f
         # print ShellName
@@ -439,14 +442,14 @@ def getEnviron():
     """ Setup the environment variables needed to launch 3DFSC. """
     environ = Environ(os.environ)
     CRYOLO_HOME = os.environ.get('CRYOLO_HOME')
-
-    environ.update({
-        'PATH': join(CRYOLO_HOME, 'bin'),
-    }, position=Environ.BEGIN)
+    print(' > > >  H E R E  < < <  :  %s' % environ.get('PYTHONPATH'))
+    environ.update({'PATH': join(CRYOLO_HOME, 'bin')},
+                   position=Environ.BEGIN)
 
     if 'PYTHONPATH' in environ:
         # this is required for python virtual env to work
-        environ.set('PYTHONPATH', '', position=Environ.BEGIN)
+        del environ['PYTHONPATH']
+    print(' > > >  -------  < < <  :  %s' % environ.get('PYTHONPATH'))
     return environ
 
 def getProgram(self, program):
