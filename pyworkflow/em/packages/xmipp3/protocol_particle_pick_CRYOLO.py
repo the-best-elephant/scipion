@@ -33,6 +33,7 @@ from pyworkflow.utils import Environ
 from pyworkflow.protocol.launch import launch
 from pyworkflow.utils.path import *
 from pyworkflow.em.showj import launchSupervisedPickerGUI
+#from base import ProtImportFiles
 from convert import writeSetOfMicrographs, readSetOfCoordinates
 
 import xmipp
@@ -51,6 +52,10 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
     #--------------------------- DEFINE param functions ------------------------   
     def _defineParams(self, form):
         ProtParticlePicking._defineParams(self, form)
+        form.addParam('inputCoordinates', params.PointerParam,
+                      pointerClass='SetOfCoordinates',
+                      label='Input coordinates', important=True,
+                      help='Select the SetOfCoordinates to be used to train.')
         form.addParam('memory', FloatParam, default=2,
                       label='Memory to use (In Gb)', expertLevel=2)
         # form.addParam('saveDiscarded', BooleanParam, default=False,
@@ -83,19 +88,42 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         micFn = self.inputMics.getFileName()
 
         # Launch Particle Picking GUI
-        self._insertFunctionStep('launchParticlePickGUIStep', micFn)
+        #self._insertFunctionStep('importParticleCoordinates')
+        #self._insertFunctionStep('launchParticlePickGUIStep', micFn)
         self._insertFunctionStep('convertTrainCoordsStep')
         self._insertFunctionStep('createConfigurationFileStep')
         self._insertFunctionStep('cryoloModelingStep')
         self._insertFunctionStep('cryoloDeepPickingStep')
         self._insertFunctionStep('createOutputStep')
 
-    def launchParticlePickGUIStep(self, micFn):
-        # Launch the particle picking GUI
-        extraDir = self._getExtraPath()
-        memory = int(self.memory.get())
-        process = launchSupervisedPickerGUI(micFn, extraDir, self, memory=memory)
-        process.wait()
+    # #def launchParticlePickGUIStep(self, micFn):
+    #     # Launch the particle picking GUI
+    #     extraDir = self._getExtraPath()
+    #     memory = int(self.memory.get())
+    #     process = launchSupervisedPickerGUI(micFn, extraDir, self, memory=memory)
+    #     process.wait()
+
+    # def importParticleCoordinates(self):
+
+        # inputMics = self.inputMicrographs.get()
+        # coordsSet = self._createSetOfCoordinates(inputMics)
+        # coordsSet.setBoxSize(self.getBoxSize())
+        # ci = self.getImportClass()
+        # print ci
+        # for coordFile, fileId in self.iterFiles():
+        #     mic = self.getMatchingMic(coordFile, fileId)
+        #     if mic is not None:
+        #         def addCoordinate(coord):
+        #             coord.setMicrograph(mic)
+        #             self.correctCoordinatePosition(coord)
+        #             coordsSet.append(coord)
+        #
+        #         # Parse the coordinates in the given format for this micrograph
+        #         ci.importCoordinates(coordFile, addCoordinate=addCoordinate)
+        #
+        # self._defineOutputs(outputCoordinates=coordsSet)
+        # self._defineSourceRelation(self.inputMicrographs, coordsSet)
+
 
     def convertTrainCoordsStep(self):
 
@@ -111,10 +139,12 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
             #print fileNameOut
 
 
-        coordFn = self._getPath('coordinates.sqlite')
-        coordSet = SetOfCoordinates(filename=coordFn)
-        coordSet._xmippMd = String()
-        coordSet.loadAllProperties()
+        # coordFn = self._getPath('coordinates.sqlite')
+        # coordSet = SetOfCoordinates(filename=coordFn)
+        # coordSet._xmippMd = String()
+        # coordSet.loadAllProperties()
+
+        coordSet = self.inputCoordinates.get()
         self.boxSize = coordSet.getBoxSize()
 
         trainMicDir = self._getExtraPath('train_image')
@@ -153,8 +183,9 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
     def createConfigurationFileStep(self):
 
         inputSize = self.input_size.get()
-        anchors = self.boxSize.get()
+        anchors = self.anchors.get()
         maxBoxPerImage = self.max_box_per_image.get()
+
 
         model = {"architecture": "crYOLO",
                  "input_size": inputSize,
@@ -204,14 +235,13 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         if eParam != 0:
             params += " -e %s" % eParam
 
-        #program = getProgram('cryolo_train.py')
-        program = self._getProgram('cryolo_boxmanager.py')
+        program = getProgram('cryolo_train.py')
 
-        self.preparingCondaProgram(program)#, params)
+        self.preparingCondaProgram(program, params)
         shellName = os.environ.get('SHELL')
 
         self.info("**Running:** %s %s" % (program, params))
-        self.runJob('%s ./script.sh' % shellName, '', cwd=self._getExtraPath(),
+        self.runJob('%s ./script_%s.sh' % (shellName, program), '', cwd=self._getExtraPath(),
                     env=getEnviron())
         # if not exists(self._getFileName('out_vol3DFSC')):
         #     raise Exception('3D FSC run failed!')
@@ -229,96 +259,14 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
         params += "-t %s" % tParam
 
         program2 = getProgram('cryolo_predict.py')
+
+        self.preparingCondaProgram(program2, params)
         shellName = os.environ.get('SHELL')
         self.info("**Running:** %s %s" % (program2, params))
-        self.runJob('%s ./script.sh' % shellName, '',
+        self.runJob('%s ./script_%s.sh' % (shellName, program2), '',
                     cwd=self._getExtraPath(),
                     env=getEnviron())
 
-
-    def preparingCondaProgram(self, program, params=''):
-        CRYOLO_ENV_NAME = 'cryolo'
-        f = open(self._getExtraPath('script.sh'), "w")
-        # print f
-        # print ShellName
-        # line0 = 'conda create -n cryolo -c anaconda python=2 pyqt=5 cudnn=7.1.2'
-        lines = 'source activate %s\n' % CRYOLO_ENV_NAME
-        lines += '%s %s\n' % (program, params)
-        lines += 'source deactivate\n'
-        f.write(lines)
-        f.close()
-
-
-    # def _getArgs(self):
-    #     """ Prepare the args dictionary."""
-    #
-    #     args = {'--halfmap1': basename(self._getFileName('input_half1Fn')),
-    #             '--halfmap2': basename(self._getFileName('input_half2Fn')),
-    #             '--fullmap': basename(self._getFileName('input_volFn')),
-    #             '--apix': self.inputVolume.get().getSamplingRate(),
-    #             '--ThreeDFSC': '3D-FSC',
-    #             '--dthetaInDegrees': self.dTheta.get(),
-    #             '--FSCCutoff': self.fscCutoff.get(),
-    #             '--ThresholdForSphericity': self.thrSph.get(),
-    #             '--HighPassFilter': self.hpFilter.get(),
-    #             '--numThresholdsForSphericityCalcs': self.numThr.get()
-
-
-
-    #     first version
-    #     """ Setup the environment variables needed to launch crYOLO. """
-    #     environ = Environ(os.environ)
-    #     pos = pwutils.Environ.BEGIN if first else pwutils.Environ.END
-    #     crYOLO_HOME = os.environ[('CRYOLO_HOME')] #?
-    #     LD_LIBRARY_PATH = os.environ[]
-    #     print crYOLO_HOME
-    #     print ('bekafos')
-    #     environ.update({'PATH': os.path.join(crYOLO_HOME, 'build','bin'),
-    # }, position=pos)
-    #
-    #     # replace variable value
-    #     environ.update({
-    #         ''
-    #         'PWD=/home/phorvath/crYOLO'
-    #         'LIBTBX_BUILD': os.path.join(crYOLO_home, 'build'),
-    #         'LIBTBX_OPATH': os.environ['PATH'],
-    #     }, position=pwutils.Environ.REPLACE)  # replace
-    #
-    #     cudaLib = getCudaLib(environ, useMC2)
-    #     environ.addLibrary(cudaLib)
-    #
-    #     return environ
-
-
-
-    # def runCrYOLOProgram(program, args=None, extraEnvDict=None, cwd=None):
-    #     """ Internal shortcut function to launch a Phenix program. """
-    #     env = getEnviron()
-    #     if extraEnvDict is not None:
-    #         env.update(extraEnvDict)
-    #     program = PHENIX_PYTHON + program
-    #     pwutils.runJob(None, program, args, env=env, cwd=cwd)
-
-
-
-
-    #
-    # def
-    # getEnviron(cls):
-    # """ Setup the environment variables needed to launch sachselab. """
-    # environ = Environ(os.environ)
-    # print("getEnvirion(): %s" % os.environ.get(LOCSCALE_HOME_VAR))
-    # if ('%s' % Plugin._homeVar) in environ:
-    #     environ.update({
-    #         'PATH': os.environ[Plugin._homeVar],
-    #         'LD_LIBRARY_PATH': str.join(os.environ[Plugin._homeVar],
-    #                                     'sachselablib')
-    #                            + ":" + os.environ[Plugin._homeVar],
-    #     }, position=Environ.BEGIN)
-    # else:
-    #     # TODO: Find a generic way to warn of this situation
-    #     print "%s variable not set on environment." % Plugin._homeVar
-    # return environ
 
 
     def createOutputStep(self):
@@ -349,28 +297,36 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
     def _citations(self):
         return ['Wagner2018']
 
-    #--------------------------- UTILS functions -------------------------------
-    def __str__(self):
-        """ String representation of a Supervised Picking run """
-        if not hasattr(self, 'outputCoordinates'):
-            msg = "No particles picked yet."
-        else:
-
-            picked = 0
-            # Get the number of picked particles of the last coordinates set
-            for key, output in self.iterOutputAttributes(EMObject):
-                picked = output.getSize()
-
-            msg = "%d particles picked (from %d micrographs)" % \
-                  (picked, self.inputMicrographs.get().getSize())
-
-        return msg
-
     def _methods(self):
         if self.getOutputsSize() > 0:
             return ProtParticlePicking._methods(self)
         else:
             return [self._getTmpMethods()]
+
+    def _summary(self):
+        if self.getOutputsSize() > 0:
+            return ProtParticlePicking._summary(self)
+        else:
+            return [self._getTmpSummary()]
+
+    #--------------------------- UTILS functions -------------------------------
+        # def __str__(self):
+    #     """ String representation of a Supervised Picking run """
+    #     if not hasattr(self, 'outputCoordinates'):
+    #         msg = "No particles picked yet."
+    #     else:
+    #
+    #         picked = 0
+    #         # Get the number of picked particles of the last coordinates set
+    #         for key, output in self.iterOutputAttributes(EMObject):
+    #             picked = output.getSize()
+    #
+    #         msg = "%d particles picked (from %d micrographs)" % \
+    #               (picked, self.inputMicrographs.get().getSize())
+    #
+    #     return msg
+
+
 
     def _getTmpMethods(self):
         """ Return the message when there is not output generated yet.
@@ -405,11 +361,7 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
 
         return msg
 
-    def _summary(self):
-        if self.getOutputsSize() > 0:
-            return ProtParticlePicking._summary(self)
-        else:
-            return [self._getTmpSummary()]
+
 
     def _getTmpSummary(self):
         summary = []
@@ -434,17 +386,28 @@ class XmippProtParticlePickingCRYOLO(ProtParticlePicking, XmippProtocol):
             summary.append("Last micrograph: " + activeMic)
         return "\n".join(summary)
 
-    def getCoordsDir(self):
-        return self._getExtraPath()
+    def preparingCondaProgram(self, program, params=''):
+        CRYOLO_ENV_NAME = 'cryolo'
+        f = open(self._getExtraPath('script_%s.sh'%program), "w")
+        # print f
+        # print ShellName
+        # line0 = 'conda create -n cryolo -c anaconda python=2 pyqt=5 cudnn=7.1.2'
+        lines = 'source activate %s\n' % CRYOLO_ENV_NAME
+        lines += '%s %s\n' % (program, params)
+        lines += 'source deactivate\n'
+        f.write(lines)
+        f.close()
 
+
+# This should be at the Plugin.__init__.py  ??
 
 def getEnviron():
     """ Setup the environment variables needed to launch 3DFSC. """
     environ = Environ(os.environ)
-    CRYOLO_HOME = os.environ.get('CRYOLO_HOME')
+    CRYOLO_HOME = os.environ['CRYOLO_HOME']
     print(' > > >  H E R E  < < <  :  %s' % environ.get('PYTHONPATH'))
-    environ.update({'PATH': join(CRYOLO_HOME, 'bin')},
-                   position=Environ.BEGIN)
+    environ.update({'PATH': join(CRYOLO_HOME, 'bin')
+                        }, position=Environ.BEGIN)
 
     if 'PYTHONPATH' in environ:
         # this is required for python virtual env to work
@@ -452,7 +415,7 @@ def getEnviron():
     print(' > > >  -------  < < <  :  %s' % environ.get('PYTHONPATH'))
     return environ
 
-def getProgram(self, program):
+def getProgram(program):
     """ Return the program binary that will be used. """
     if 'CRYOLO_HOME' not in os.environ:
         print("CRYOLO_HOME is not in the environ")
